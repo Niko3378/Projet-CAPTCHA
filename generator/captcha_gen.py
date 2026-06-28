@@ -3,8 +3,8 @@ import string
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
 CHARS = string.ascii_uppercase + string.digits  # A-Z + 0-9
-CAPTCHA_LENGTH = 5
-IMG_WIDTH = 200
+CAPTCHA_LENGTH = 8
+IMG_WIDTH = 320
 IMG_HEIGHT = 60
 CHAR_W = 38   # largeur réservée par caractère
 CHAR_H = 60   # hauteur complète de l'image

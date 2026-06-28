@@ -59,6 +59,22 @@
     .captcha-box img { border-radius: .25rem; max-width: 100%; }
     .captcha-box .placeholder { color: #475569; font-size: .85rem; }
 
+    .captcha-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: .5rem;
+    }
+
+    .timer {
+      font-size: .8rem;
+      color: #94a3b8;
+      min-width: 80px;
+      text-align: right;
+    }
+    .timer.warning { color: #f59e0b; }
+    .timer.danger  { color: #ef4444; font-weight: 700; }
+
     input[type="text"] {
       width: 100%;
       padding: .6rem 1rem;
@@ -66,8 +82,8 @@
       border: 1px solid #334155;
       border-radius: .5rem;
       color: #e2e8f0;
-      font-size: 1rem;
-      letter-spacing: .1em;
+      font-size: 1.1rem;
+      letter-spacing: .2em;
       text-transform: uppercase;
       outline: none;
       transition: border-color .2s;
@@ -86,9 +102,10 @@
     button:active { transform: scale(.97); }
     button:disabled { opacity: .5; cursor: not-allowed; }
 
-    .btn-primary { background: #6366f1; color: #fff; }
+    .btn-primary   { background: #6366f1; color: #fff; }
     .btn-secondary { background: #0ea5e9; color: #fff; }
-    .btn-success { background: #10b981; color: #fff; }
+    .btn-success   { background: #10b981; color: #fff; }
+    .btn-audio     { background: #7c3aed; color: #fff; padding: .6rem .9rem; }
     .btn-row { display: flex; gap: .75rem; flex-wrap: wrap; }
 
     .result {
@@ -132,30 +149,45 @@
     }
     .upload-area p { color: #64748b; font-size: .85rem; }
     .upload-area .upload-preview { max-width: 100%; border-radius: .25rem; margin-top: .5rem; }
+
+    .badge {
+      display: inline-block;
+      font-size: .7rem;
+      background: #334155;
+      color: #94a3b8;
+      border-radius: 999px;
+      padding: .15rem .5rem;
+      margin-left: .4rem;
+      vertical-align: middle;
+    }
   </style>
 </head>
 <body>
   <h1>CAPTCHA Demo</h1>
-  <p class="subtitle">Génération · Validation manuelle · Résolution IA</p>
+  <p class="subtitle">Génération · Validation manuelle · Mode audio · Résolution IA</p>
 
   <div class="grid">
 
     <!-- CARD 1 : Générer & Valider -->
     <div class="card">
-      <h2>Générer un CAPTCHA</h2>
+      <h2>Générer un CAPTCHA <span class="badge">8 caractères</span></h2>
 
       <div class="captcha-box" id="captchaBox">
         <span class="placeholder">Cliquez sur "Générer"</span>
       </div>
 
-      <div class="btn-row">
-        <button class="btn-primary" onclick="generateCaptcha()">Générer</button>
-        <button class="btn-secondary" id="btnSolveAuto" onclick="solveAuto()" disabled>Résoudre (IA)</button>
+      <div class="captcha-toolbar">
+        <div class="btn-row">
+          <button class="btn-primary" onclick="generateCaptcha()">Générer</button>
+          <button class="btn-audio"   id="btnAudio"     onclick="playAudio()" disabled title="Écouter le CAPTCHA">🔊 Audio</button>
+          <button class="btn-secondary" id="btnSolveAuto" onclick="solveAuto()" disabled>Résoudre (IA)</button>
+        </div>
+        <span class="timer" id="timerDisplay"></span>
       </div>
 
       <hr class="divider" />
 
-      <input type="text" id="userAnswer" placeholder="Votre réponse…" maxlength="5" />
+      <input type="text" id="userAnswer" placeholder="Votre réponse…" maxlength="8" />
       <div class="btn-row">
         <button class="btn-success" id="btnValidate" onclick="validateCaptcha()" disabled>Valider</button>
       </div>
@@ -182,112 +214,186 @@
   </div>
 
   <script>
-    const API = '';   // même origine
-    let currentCaptchaId = null;
-    let currentImageBlob = null;
+    const API = ''
+    let currentCaptchaId  = null
+    let currentImageBlob  = null
+    let timerInterval     = null
+
+    function startTimer(seconds) {
+      clearInterval(timerInterval)
+      const display = document.getElementById('timerDisplay')
+      let remaining = seconds
+
+      function tick() {
+        const m = Math.floor(remaining / 60)
+        const s = String(remaining % 60).padStart(2, '0')
+        display.textContent = `Expire dans ${m}:${s}`
+        display.className = 'timer' + (remaining <= 30 ? ' danger' : remaining <= 60 ? ' warning' : '')
+        if (remaining <= 0) {
+          clearInterval(timerInterval)
+          display.textContent = 'Expiré'
+          display.className = 'timer danger'
+          disableAll()
+          const el = document.getElementById('validateResult')
+          el.className = 'result error'
+          el.textContent = 'CAPTCHA expiré — générez-en un nouveau.'
+        }
+        remaining--
+      }
+      tick()
+      timerInterval = setInterval(tick, 1000)
+    }
+
+    function disableAll() {
+      document.getElementById('btnValidate').disabled  = true
+      document.getElementById('btnSolveAuto').disabled = true
+      document.getElementById('btnAudio').disabled     = true
+    }
 
     async function generateCaptcha() {
-      const box = document.getElementById('captchaBox');
-      box.innerHTML = '<span class="placeholder">Chargement…</span>';
-      document.getElementById('validateResult').className = 'result';
-      document.getElementById('userAnswer').value = '';
+      clearInterval(timerInterval)
+      document.getElementById('timerDisplay').textContent = ''
+      document.getElementById('validateResult').className = 'result'
+      document.getElementById('userAnswer').value = ''
+      disableAll()
 
-      const res = await fetch(`${API}/generate`);
-      const data = await res.json();
-      currentCaptchaId = data.captcha_id;
+      const box = document.getElementById('captchaBox')
+      box.innerHTML = '<span class="placeholder">Chargement…</span>'
 
-      const img = new Image();
-      img.src = 'data:image/png;base64,' + data.image;
-      img.style.imageRendering = 'pixelated';
-      box.innerHTML = '';
-      box.appendChild(img);
+      const res = await fetch(`${API}/generate`)
+      if (!res.ok) {
+        const err = await res.json()
+        box.innerHTML = `<span class="placeholder" style="color:#fca5a5">${err.detail}</span>`
+        return
+      }
+      const data = await res.json()
+      currentCaptchaId = data.captcha_id
 
-      // Store blob for AI solver
-      const byteStr = atob(data.image);
-      const arr = new Uint8Array(byteStr.length);
-      for (let i = 0; i < byteStr.length; i++) arr[i] = byteStr.charCodeAt(i);
-      currentImageBlob = new Blob([arr], { type: 'image/png' });
+      const img = new Image()
+      img.src = 'data:image/png;base64,' + data.image
+      img.style.imageRendering = 'pixelated'
+      box.innerHTML = ''
+      box.appendChild(img)
 
-      document.getElementById('btnValidate').disabled = false;
-      document.getElementById('btnSolveAuto').disabled = false;
+      const byteStr = atob(data.image)
+      const arr = new Uint8Array(byteStr.length)
+      for (let i = 0; i < byteStr.length; i++) arr[i] = byteStr.charCodeAt(i)
+      currentImageBlob = new Blob([arr], { type: 'image/png' })
+
+      document.getElementById('btnValidate').disabled  = false
+      document.getElementById('btnSolveAuto').disabled = false
+      document.getElementById('btnAudio').disabled     = false
+
+      startTimer(data.expires_in)
+    }
+
+    async function playAudio() {
+      if (!currentCaptchaId) return
+      const btn = document.getElementById('btnAudio')
+      btn.disabled = true
+      btn.textContent = '🔊 …'
+      try {
+        const res = await fetch(`${API}/audio/${currentCaptchaId}`)
+        if (!res.ok) {
+          const err = await res.json()
+          alert(err.detail)
+          return
+        }
+        const blob = await res.blob()
+        const url  = URL.createObjectURL(blob)
+        const audio = new Audio(url)
+        audio.play()
+        audio.onended = () => URL.revokeObjectURL(url)
+      } finally {
+        btn.disabled = false
+        btn.textContent = '🔊 Audio'
+      }
     }
 
     async function validateCaptcha() {
-      const answer = document.getElementById('userAnswer').value.trim();
-      if (!answer || !currentCaptchaId) return;
+      const answer = document.getElementById('userAnswer').value.trim()
+      if (!answer || !currentCaptchaId) return
 
       const res = await fetch(`${API}/validate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ captcha_id: currentCaptchaId, answer }),
-      });
-      const data = await res.json();
-      const el = document.getElementById('validateResult');
+      })
+      const data = await res.json()
+      const el = document.getElementById('validateResult')
+
+      if (!res.ok) {
+        el.className = 'result error'
+        el.textContent = '⚠ ' + data.detail
+        return
+      }
+
+      clearInterval(timerInterval)
+      document.getElementById('timerDisplay').textContent = ''
 
       if (data.valid) {
-        el.className = 'result success';
-        el.textContent = '✓ Correct !';
+        el.className = 'result success'
+        el.textContent = '✓ Correct !'
       } else {
-        el.className = 'result error';
-        el.textContent = `✗ Incorrect. Réponse attendue : ${data.expected}`;
+        el.className = 'result error'
+        el.textContent = `✗ Incorrect. Réponse attendue : ${data.expected}`
       }
-      currentCaptchaId = null;
-      document.getElementById('btnValidate').disabled = true;
-      document.getElementById('btnSolveAuto').disabled = true;
+      currentCaptchaId = null
+      disableAll()
     }
 
     async function solveAuto() {
-      if (!currentImageBlob) return;
-      const el = document.getElementById('validateResult');
-      el.className = 'result info';
-      el.textContent = 'IA en cours…';
+      if (!currentImageBlob) return
+      const el = document.getElementById('validateResult')
+      el.className = 'result info'
+      el.textContent = 'IA en cours…'
 
-      const form = new FormData();
-      form.append('file', currentImageBlob, 'captcha.png');
-      const res = await fetch(`${API}/solve`, { method: 'POST', body: form });
+      const form = new FormData()
+      form.append('file', currentImageBlob, 'captcha.png')
+      const res = await fetch(`${API}/solve`, { method: 'POST', body: form })
 
       if (!res.ok) {
-        const err = await res.json();
-        el.className = 'result error';
-        el.textContent = '⚠ ' + err.detail;
-        return;
+        const err = await res.json()
+        el.className = 'result error'
+        el.textContent = '⚠ ' + err.detail
+        return
       }
-      const data = await res.json();
-      document.getElementById('userAnswer').value = data.text;
-      el.className = 'result info';
-      el.textContent = `IA propose : ${data.text}`;
+      const data = await res.json()
+      document.getElementById('userAnswer').value = data.text
+      el.className = 'result info'
+      el.textContent = `IA propose : ${data.text}`
     }
 
     function onFileSelected(e) {
-      const file = e.target.files[0];
-      if (!file) return;
-      currentImageBlob = file;
-      const preview = document.getElementById('uploadPreview');
-      preview.src = URL.createObjectURL(file);
-      preview.style.display = 'block';
-      document.getElementById('uploadArea').querySelector('p').style.display = 'none';
-      document.getElementById('btnUploadSolve').disabled = false;
+      const file = e.target.files[0]
+      if (!file) return
+      currentImageBlob = file
+      const preview = document.getElementById('uploadPreview')
+      preview.src = URL.createObjectURL(file)
+      preview.style.display = 'block'
+      document.getElementById('uploadArea').querySelector('p').style.display = 'none'
+      document.getElementById('btnUploadSolve').disabled = false
     }
 
     async function uploadSolve() {
-      if (!currentImageBlob) return;
-      const el = document.getElementById('solveResult');
-      el.className = 'result info';
-      el.textContent = 'Analyse en cours…';
+      if (!currentImageBlob) return
+      const el = document.getElementById('solveResult')
+      el.className = 'result info'
+      el.textContent = 'Analyse en cours…'
 
-      const form = new FormData();
-      form.append('file', currentImageBlob, 'captcha.png');
-      const res = await fetch(`${API}/solve`, { method: 'POST', body: form });
+      const form = new FormData()
+      form.append('file', currentImageBlob, 'captcha.png')
+      const res = await fetch(`${API}/solve`, { method: 'POST', body: form })
 
       if (!res.ok) {
-        const err = await res.json();
-        el.className = 'result error';
-        el.textContent = '⚠ ' + err.detail;
-        return;
+        const err = await res.json()
+        el.className = 'result error'
+        el.textContent = '⚠ ' + err.detail
+        return
       }
-      const data = await res.json();
-      el.className = 'result success';
-      el.innerHTML = `IA lit : <span class="tag">${data.text}</span>`;
+      const data = await res.json()
+      el.className = 'result success'
+      el.innerHTML = `IA lit : <span class="tag">${data.text}</span>`
     }
   </script>
 </body>
