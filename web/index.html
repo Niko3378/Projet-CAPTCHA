@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CAPTCHA Demo</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 2rem 1rem;
+    }
+
+    h1 {
+      font-size: 2rem;
+      font-weight: 700;
+      margin-bottom: .25rem;
+      background: linear-gradient(135deg, #6366f1, #06b6d4);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .subtitle { color: #94a3b8; margin-bottom: 2.5rem; font-size: .95rem; }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 1.5rem;
+      width: 100%;
+      max-width: 860px;
+    }
+
+    .card {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 1rem;
+      padding: 1.5rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+    .card h2 { font-size: 1.1rem; color: #cbd5e1; }
+
+    .captcha-box {
+      background: #0f172a;
+      border: 2px dashed #334155;
+      border-radius: .5rem;
+      min-height: 80px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .captcha-box img { border-radius: .25rem; max-width: 100%; }
+    .captcha-box .placeholder { color: #475569; font-size: .85rem; }
+
+    input[type="text"] {
+      width: 100%;
+      padding: .6rem 1rem;
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: .5rem;
+      color: #e2e8f0;
+      font-size: 1rem;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      outline: none;
+      transition: border-color .2s;
+    }
+    input[type="text"]:focus { border-color: #6366f1; }
+
+    button {
+      padding: .6rem 1.2rem;
+      border-radius: .5rem;
+      border: none;
+      cursor: pointer;
+      font-size: .9rem;
+      font-weight: 600;
+      transition: opacity .2s, transform .1s;
+    }
+    button:active { transform: scale(.97); }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+
+    .btn-primary { background: #6366f1; color: #fff; }
+    .btn-secondary { background: #0ea5e9; color: #fff; }
+    .btn-success { background: #10b981; color: #fff; }
+    .btn-row { display: flex; gap: .75rem; flex-wrap: wrap; }
+
+    .result {
+      padding: .6rem 1rem;
+      border-radius: .5rem;
+      font-size: .9rem;
+      font-weight: 600;
+      display: none;
+    }
+    .result.success { background: #064e3b; color: #6ee7b7; display: block; }
+    .result.error   { background: #450a0a; color: #fca5a5; display: block; }
+    .result.info    { background: #1e3a5f; color: #93c5fd; display: block; }
+
+    .tag {
+      display: inline-block;
+      font-size: 1.4rem;
+      font-weight: 700;
+      letter-spacing: .15em;
+      color: #06b6d4;
+      background: #0f172a;
+      border-radius: .5rem;
+      padding: .4rem 1rem;
+      font-family: monospace;
+    }
+
+    .divider { border: none; border-top: 1px solid #334155; }
+
+    .upload-area {
+      background: #0f172a;
+      border: 2px dashed #334155;
+      border-radius: .5rem;
+      padding: 1.5rem;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color .2s;
+      position: relative;
+    }
+    .upload-area:hover { border-color: #6366f1; }
+    .upload-area input[type="file"] {
+      position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%;
+    }
+    .upload-area p { color: #64748b; font-size: .85rem; }
+    .upload-area .upload-preview { max-width: 100%; border-radius: .25rem; margin-top: .5rem; }
+  </style>
+</head>
+<body>
+  <h1>CAPTCHA Demo</h1>
+  <p class="subtitle">Génération · Validation manuelle · Résolution IA</p>
+
+  <div class="grid">
+
+    <!-- CARD 1 : Générer & Valider -->
+    <div class="card">
+      <h2>Générer un CAPTCHA</h2>
+
+      <div class="captcha-box" id="captchaBox">
+        <span class="placeholder">Cliquez sur "Générer"</span>
+      </div>
+
+      <div class="btn-row">
+        <button class="btn-primary" onclick="generateCaptcha()">Générer</button>
+        <button class="btn-secondary" id="btnSolveAuto" onclick="solveAuto()" disabled>Résoudre (IA)</button>
+      </div>
+
+      <hr class="divider" />
+
+      <input type="text" id="userAnswer" placeholder="Votre réponse…" maxlength="5" />
+      <div class="btn-row">
+        <button class="btn-success" id="btnValidate" onclick="validateCaptcha()" disabled>Valider</button>
+      </div>
+
+      <div class="result" id="validateResult"></div>
+    </div>
+
+    <!-- CARD 2 : Solver IA sur image uploadée -->
+    <div class="card">
+      <h2>Résoudre avec l'IA</h2>
+      <p style="color:#64748b;font-size:.85rem;">Uploadez n'importe quelle image CAPTCHA générée par ce projet.</p>
+
+      <div class="upload-area" id="uploadArea">
+        <input type="file" accept="image/*" id="fileInput" onchange="onFileSelected(event)" />
+        <p>Glissez une image ou cliquez pour choisir</p>
+        <img class="upload-preview" id="uploadPreview" style="display:none;" />
+      </div>
+
+      <button class="btn-secondary" id="btnUploadSolve" onclick="uploadSolve()" disabled>Analyser avec l'IA</button>
+
+      <div class="result" id="solveResult"></div>
+    </div>
+
+  </div>
+
+  <script>
+    const API = '';   // même origine
+    let currentCaptchaId = null;
+    let currentImageBlob = null;
+
+    async function generateCaptcha() {
+      const box = document.getElementById('captchaBox');
+      box.innerHTML = '<span class="placeholder">Chargement…</span>';
+      document.getElementById('validateResult').className = 'result';
+      document.getElementById('userAnswer').value = '';
+
+      const res = await fetch(`${API}/generate`);
+      const data = await res.json();
+      currentCaptchaId = data.captcha_id;
+
+      const img = new Image();
+      img.src = 'data:image/png;base64,' + data.image;
+      img.style.imageRendering = 'pixelated';
+      box.innerHTML = '';
+      box.appendChild(img);
+
+      // Store blob for AI solver
+      const byteStr = atob(data.image);
+      const arr = new Uint8Array(byteStr.length);
+      for (let i = 0; i < byteStr.length; i++) arr[i] = byteStr.charCodeAt(i);
+      currentImageBlob = new Blob([arr], { type: 'image/png' });
+
+      document.getElementById('btnValidate').disabled = false;
+      document.getElementById('btnSolveAuto').disabled = false;
+    }
+
+    async function validateCaptcha() {
+      const answer = document.getElementById('userAnswer').value.trim();
+      if (!answer || !currentCaptchaId) return;
+
+      const res = await fetch(`${API}/validate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ captcha_id: currentCaptchaId, answer }),
+      });
+      const data = await res.json();
+      const el = document.getElementById('validateResult');
+
+      if (data.valid) {
+        el.className = 'result success';
+        el.textContent = '✓ Correct !';
+      } else {
+        el.className = 'result error';
+        el.textContent = `✗ Incorrect. Réponse attendue : ${data.expected}`;
+      }
+      currentCaptchaId = null;
+      document.getElementById('btnValidate').disabled = true;
+      document.getElementById('btnSolveAuto').disabled = true;
+    }
+
+    async function solveAuto() {
+      if (!currentImageBlob) return;
+      const el = document.getElementById('validateResult');
+      el.className = 'result info';
+      el.textContent = 'IA en cours…';
+
+      const form = new FormData();
+      form.append('file', currentImageBlob, 'captcha.png');
+      const res = await fetch(`${API}/solve`, { method: 'POST', body: form });
+
+      if (!res.ok) {
+        const err = await res.json();
+        el.className = 'result error';
+        el.textContent = '⚠ ' + err.detail;
+        return;
+      }
+      const data = await res.json();
+      document.getElementById('userAnswer').value = data.text;
+      el.className = 'result info';
+      el.textContent = `IA propose : ${data.text}`;
+    }
+
+    function onFileSelected(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      currentImageBlob = file;
+      const preview = document.getElementById('uploadPreview');
+      preview.src = URL.createObjectURL(file);
+      preview.style.display = 'block';
+      document.getElementById('uploadArea').querySelector('p').style.display = 'none';
+      document.getElementById('btnUploadSolve').disabled = false;
+    }
+
+    async function uploadSolve() {
+      if (!currentImageBlob) return;
+      const el = document.getElementById('solveResult');
+      el.className = 'result info';
+      el.textContent = 'Analyse en cours…';
+
+      const form = new FormData();
+      form.append('file', currentImageBlob, 'captcha.png');
+      const res = await fetch(`${API}/solve`, { method: 'POST', body: form });
+
+      if (!res.ok) {
+        const err = await res.json();
+        el.className = 'result error';
+        el.textContent = '⚠ ' + err.detail;
+        return;
+      }
+      const data = await res.json();
+      el.className = 'result success';
+      el.innerHTML = `IA lit : <span class="tag">${data.text}</span>`;
+    }
+  </script>
+</body>
+</html>
