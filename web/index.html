@@ -150,6 +150,40 @@
     .upload-area p { color: #64748b; font-size: .85rem; }
     .upload-area .upload-preview { max-width: 100%; border-radius: .25rem; margin-top: .5rem; }
 
+    .img-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 4px;
+      background: #334155;
+      padding: 4px;
+      border-radius: .5rem;
+    }
+    .img-grid .cell {
+      cursor: pointer;
+      border-radius: 3px;
+      border: 3px solid transparent;
+      overflow: hidden;
+      transition: border-color .15s;
+      aspect-ratio: 1;
+    }
+    .img-grid .cell img { width: 100%; height: 100%; display: block; image-rendering: pixelated; }
+    .img-grid .cell.selected { border-color: #6366f1; }
+    .img-grid .cell.correct  { border-color: #10b981; }
+    .img-grid .cell.wrong    { border-color: #ef4444; }
+
+    .question {
+      color: #cbd5e1;
+      font-size: .9rem;
+      background: #0f172a;
+      padding: .6rem 1rem;
+      border-radius: .5rem;
+      text-align: center;
+      min-height: 2.5rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
     .badge {
       display: inline-block;
       font-size: .7rem;
@@ -193,6 +227,27 @@
       </div>
 
       <div class="result" id="validateResult"></div>
+    </div>
+
+    <!-- CARD 3 : CAPTCHA Image -->
+    <div class="card">
+      <h2>CAPTCHA Image <span class="badge">3×3 grille</span></h2>
+
+      <div class="question" id="imageQuestion">Cliquez sur "Générer" pour commencer</div>
+
+      <div class="img-grid" id="imgGrid"></div>
+
+      <div class="captcha-toolbar">
+        <div class="btn-row">
+          <button class="btn-primary"   onclick="generateImageCaptcha()">Générer</button>
+          <button class="btn-secondary" id="btnSolveImage" onclick="solveImageCaptcha()" disabled>Résoudre (IA)</button>
+        </div>
+        <span class="timer" id="imageTimerDisplay"></span>
+      </div>
+
+      <button class="btn-success" id="btnValidateImage" onclick="validateImageCaptcha()" disabled>Valider</button>
+
+      <div class="result" id="imageResult"></div>
     </div>
 
     <!-- CARD 2 : Solver IA sur image uploadée -->
@@ -362,6 +417,116 @@
       document.getElementById('userAnswer').value = data.text
       el.className = 'result info'
       el.textContent = `IA propose : ${data.text}`
+    }
+
+    // --- CAPTCHA IMAGE ---
+    let imageCaptchaId   = null
+    let selectedCells    = new Set()
+    let imageTimerInt    = null
+
+    async function generateImageCaptcha() {
+      clearInterval(imageTimerInt)
+      selectedCells.clear()
+      imageCaptchaId = null
+      document.getElementById('imageResult').className = 'result'
+      document.getElementById('btnValidateImage').disabled = true
+      document.getElementById('btnSolveImage').disabled    = true
+      document.getElementById('imageTimerDisplay').textContent = ''
+      document.getElementById('imageQuestion').textContent = 'Chargement…'
+      document.getElementById('imgGrid').innerHTML = ''
+
+      const res = await fetch('/generate-image')
+      if (!res.ok) {
+        const err = await res.json()
+        document.getElementById('imageQuestion').textContent = err.detail
+        return
+      }
+      const data = await res.json()
+      imageCaptchaId = data.captcha_id
+      document.getElementById('imageQuestion').textContent =
+        data.question + ` (${data.n_target} image${data.n_target > 1 ? 's' : ''})`
+
+      const grid = document.getElementById('imgGrid')
+      data.cells.forEach((b64, idx) => {
+        const cell = document.createElement('div')
+        cell.className = 'cell'
+        cell.dataset.idx = idx
+        const img = document.createElement('img')
+        img.src = 'data:image/png;base64,' + b64
+        cell.appendChild(img)
+        cell.addEventListener('click', () => {
+          if (selectedCells.has(idx)) { selectedCells.delete(idx); cell.classList.remove('selected') }
+          else { selectedCells.add(idx); cell.classList.add('selected') }
+        })
+        grid.appendChild(cell)
+      })
+
+      document.getElementById('btnValidateImage').disabled = false
+      document.getElementById('btnSolveImage').disabled    = false
+      startImageTimer(data.expires_in)
+    }
+
+    function startImageTimer(seconds) {
+      const display = document.getElementById('imageTimerDisplay')
+      let remaining = seconds
+      const tick = () => {
+        const m = Math.floor(remaining / 60), s = String(remaining % 60).padStart(2, '0')
+        display.textContent = `Expire dans ${m}:${s}`
+        display.className   = 'timer' + (remaining <= 30 ? ' danger' : remaining <= 60 ? ' warning' : '')
+        if (remaining-- <= 0) {
+          clearInterval(imageTimerInt)
+          display.textContent = 'Expiré'; display.className = 'timer danger'
+        }
+      }
+      tick(); imageTimerInt = setInterval(tick, 1000)
+    }
+
+    async function validateImageCaptcha() {
+      if (!imageCaptchaId) return
+      const selected = Array.from(selectedCells)
+      const res = await fetch('/validate-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ captcha_id: imageCaptchaId, selected }),
+      })
+      const data = await res.json()
+      const el   = document.getElementById('imageResult')
+
+      if (!res.ok) { el.className = 'result error'; el.textContent = data.detail; return }
+
+      clearInterval(imageTimerInt)
+      document.getElementById('imageTimerDisplay').textContent = ''
+      document.querySelectorAll('#imgGrid .cell').forEach(cell => {
+        const idx = parseInt(cell.dataset.idx)
+        cell.classList.remove('selected')
+        if (data.correct.includes(idx))        cell.classList.add('correct')
+        else if (selected.includes(idx))       cell.classList.add('wrong')
+      })
+      el.className  = data.valid ? 'result success' : 'result error'
+      el.textContent = data.valid ? 'Correct !' : `Incorrect. Cases correctes : ${data.correct.map(i => i+1).join(', ')}`
+      imageCaptchaId = null
+      document.getElementById('btnValidateImage').disabled = true
+      document.getElementById('btnSolveImage').disabled    = true
+    }
+
+    async function solveImageCaptcha() {
+      if (!imageCaptchaId) return
+      const el = document.getElementById('imageResult')
+      el.className = 'result info'; el.textContent = 'IA en cours…'
+
+      const res = await fetch(`/solve-image/${imageCaptchaId}`)
+      if (!res.ok) {
+        const err = await res.json(); el.className = 'result error'; el.textContent = err.detail; return
+      }
+      const data = await res.json()
+      selectedCells.clear()
+      document.querySelectorAll('#imgGrid .cell').forEach(cell => {
+        const idx = parseInt(cell.dataset.idx)
+        cell.classList.remove('selected')
+        if (data.predicted.includes(idx)) { selectedCells.add(idx); cell.classList.add('selected') }
+      })
+      el.className   = 'result info'
+      el.textContent = `IA propose : cases ${data.predicted.map(i => i+1).join(', ')}`
     }
 
     function onFileSelected(e) {

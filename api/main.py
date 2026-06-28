@@ -16,9 +16,11 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 
 from generator.captcha_gen import generate_captcha
+from generator.image_captcha_gen import generate_image_captcha, CIFAR_CLASSES_FR
 from solver.predict import predict_bytes
+from solver.image_predict import solve_image_captcha
 
-app = FastAPI(title="CAPTCHA API", version="2.0.0")
+app = FastAPI(title="CAPTCHA API", version="3.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -87,10 +89,25 @@ def _generate_wav(text: str) -> bytes:
     return data
 
 
+# Image CAPTCHA store : { id: (class_fr, target_idx, correct, cell_bytes, expires_at) }
+_image_store: dict[str, tuple[str, int, list[int], list[bytes], float]] = {}
+
+
+def _cleanup_images():
+    now = time.time()
+    for k in [k for k, v in list(_image_store.items()) if now > v[4]]:
+        del _image_store[k]
+
+
 # --- Modèles Pydantic ---
 class ValidateRequest(BaseModel):
     captcha_id: str
     answer: str
+
+
+class ValidateImageRequest(BaseModel):
+    captcha_id: str
+    selected: list[int]
 
 
 # --- Endpoints ---
@@ -169,6 +186,68 @@ async def solve(request: Request, file: UploadFile = File(...)):
             detail="Modèle non entraîné. Lancez d'abord : python run.py train",
         )
     return {"text": text}
+
+
+@app.get("/generate-image")
+def generate_image_endpoint(request: Request):
+    ip = request.client.host
+    if not _check_rate(ip):
+        raise HTTPException(status_code=429, detail="Trop de requêtes")
+    _cleanup_images()
+
+    try:
+        cell_bytes, target_idx, correct = generate_image_captcha()
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Erreur génération image : {e}")
+
+    captcha_id = str(uuid.uuid4())
+    class_fr   = CIFAR_CLASSES_FR[target_idx]
+    _image_store[captcha_id] = (class_fr, target_idx, correct, cell_bytes, time.time() + CAPTCHA_TTL)
+
+    cells_b64 = [base64.b64encode(b).decode() for b in cell_bytes]
+    return {
+        "captcha_id": captcha_id,
+        "cells": cells_b64,
+        "question": f"Cliquez sur toutes les images contenant un(e) {class_fr}",
+        "n_target": len(correct),
+        "expires_in": CAPTCHA_TTL,
+    }
+
+
+@app.post("/validate-image")
+def validate_image_endpoint(req: ValidateImageRequest, request: Request):
+    ip = request.client.host
+    if not _check_rate(ip):
+        raise HTTPException(status_code=429, detail="Trop de requêtes")
+    _cleanup_images()
+
+    entry = _image_store.pop(req.captcha_id, None)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="CAPTCHA introuvable ou expiré")
+
+    class_fr, _, correct, _, expires_at = entry
+    if time.time() > expires_at:
+        raise HTTPException(status_code=410, detail="CAPTCHA expiré")
+
+    valid = sorted(req.selected) == correct
+    return {"valid": valid, "correct": correct, "selected": req.selected}
+
+
+@app.get("/solve-image/{captcha_id}")
+def solve_image_endpoint(captcha_id: str):
+    entry = _image_store.get(captcha_id)
+    if entry is None or time.time() > entry[4]:
+        raise HTTPException(status_code=404, detail="CAPTCHA introuvable ou expiré")
+
+    class_fr, target_idx, correct, cell_bytes, _ = entry
+    try:
+        predicted = solve_image_captcha(cell_bytes, target_idx)
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=503,
+            detail="Modèle image non entraîné. Lancez : python run.py train-image",
+        )
+    return {"predicted": predicted, "correct": correct}
 
 
 @app.get("/", response_class=HTMLResponse)
