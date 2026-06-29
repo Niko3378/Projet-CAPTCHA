@@ -3,27 +3,29 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
-from solver.image_model import ImageCNN
+from solver.image_model import build_resnet18_cifar
 
 
 def train_image(
-    epochs: int = 50,
+    epochs: int = 25,
     save_path: str = 'models/image_model.pth',
 ) -> None:
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f'Device: {device}', flush=True)
 
+    # ImageNet normalization required for pretrained ResNet-18
+    mean, std = (0.485, 0.456, 0.406), (0.229, 0.224, 0.225)
     transform_train = transforms.Compose([
         transforms.RandomHorizontalFlip(),
         transforms.RandomCrop(32, padding=4),
         transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
         transforms.ToTensor(),
-        transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+        transforms.Normalize(mean, std),
     ])
     transform_val = transforms.Compose([
         transforms.ToTensor(),
-        transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+        transforms.Normalize(mean, std),
     ])
 
     train_ds = datasets.CIFAR10('data/', train=True,  download=True, transform=transform_train)
@@ -32,8 +34,16 @@ def train_image(
     train_loader = DataLoader(train_ds, batch_size=128, shuffle=True,  num_workers=0)
     val_loader   = DataLoader(val_ds,   batch_size=128, shuffle=False, num_workers=0)
 
-    model     = ImageCNN().to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-4)
+    model = build_resnet18_cifar().to(device)
+
+    # Lower LR for pretrained backbone, higher for new layers (conv1 + fc)
+    new_params      = list(model.conv1.parameters()) + list(model.fc.parameters())
+    new_param_ids   = {id(p) for p in new_params}
+    backbone_params = [p for p in model.parameters() if id(p) not in new_param_ids]
+    optimizer = torch.optim.Adam([
+        {'params': backbone_params, 'lr': 1e-4},
+        {'params': new_params,      'lr': 5e-4},
+    ], weight_decay=1e-4)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
     criterion = nn.CrossEntropyLoss()
 

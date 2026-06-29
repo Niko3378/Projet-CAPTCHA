@@ -2,12 +2,12 @@ import io
 import torch
 from PIL import Image
 from torchvision import transforms
-from solver.image_model import ImageCNN
+from solver.image_model import build_resnet18_cifar
 
 _transform = transforms.Compose([
     transforms.Resize((32, 32)),
     transforms.ToTensor(),
-    transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+    transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
 ])
 
 _model  = None
@@ -17,7 +17,7 @@ _device = None
 def load_image_model(path: str = 'models/image_model.pth') -> None:
     global _model, _device
     _device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    _model  = ImageCNN().to(_device)
+    _model  = build_resnet18_cifar().to(_device)
     _model.load_state_dict(torch.load(path, map_location=_device, weights_only=True))
     _model.eval()
     print(f'Modele image charge depuis {path}')
