@@ -11,14 +11,21 @@ build/
 venv/
 
 # Modèles entraînés (binaires volumineux)
-models/captcha_model.pth
-models/captcha_model_hard.pth
+models/*.pth
+
+# Dataset CIFAR-10 (volumineux)
+data/
 
 # Images temporaires / démo
 demo_*.png
 test_*.png
+external_test.png
 tmp_*.json
+*_test.json
 _tmp_*.png
+
+# Fichiers audio de test
+*.wav
 
 # Claude Code
 .claude/
